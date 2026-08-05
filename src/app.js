@@ -6,13 +6,14 @@ import routes from "./routes/index.js";
 import { notFound } from "./middlewares/notFound.middleware.js";
 import { errorHandler } from "./middlewares/error.middleware.js";
 import { startAttendanceAutoCheckoutJob } from "./jobs/attendance.job.js";
+import { env } from "./config/env.js";
 
 startAttendanceAutoCheckoutJob();
 const app = express();
 
 app.use(
   cors({
-    origin: "http://localhost:5173",
+    origin: [env.FRONTEND_URL,"http://localhost:5173"],
     credentials: true,
   }),
 );

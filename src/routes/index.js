@@ -16,11 +16,4 @@ router.use("/leave", leaveRoutes);
 router.use("/hr", hrRoutes);
 router.use("/dashboard", dashboardRoutes);
 
-router.get("/", (req, res) => {
-  res.json({
-    success: true,
-    message: "API Running Successfully",
-  });
-});
-
 export default router;

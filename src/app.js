@@ -14,7 +14,7 @@ app.use(
   cors({
     origin: "http://localhost:5173",
     credentials: true,
-  })
+  }),
 );
 
 app.use(express.json());
@@ -23,6 +23,12 @@ app.use(cookieParser());
 
 app.use("/api", routes);
 
+app.get("/", (req, res) => {
+  res.json({
+    success: true,
+    message: "API Running Successfully",
+  });
+});
 app.use(notFound);
 app.use(errorHandler);
 

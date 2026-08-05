@@ -121,19 +121,20 @@ export const checkOut = async (req, res) => {
 
   const currentTime = getIndiaTime();
 
-  const autoCheckoutTime = currentTime.set({
-    hour: 21,
+  // Manual checkout is allowed only until 7:00 PM
+  const manualCheckoutEndTime = currentTime.set({
+    hour: 19,
     minute: 0,
     second: 0,
     millisecond: 0,
   });
 
-  if (currentTime >= autoCheckoutTime) {
+  if (currentTime >= manualCheckoutEndTime) {
     return sendResponse(
       res,
       400,
       false,
-      "Checkout time has ended. Your attendance will be automatically checked out.",
+      "Manual checkout time has ended. Your attendance will be automatically checked out at 9:00 PM.",
     );
   }
 

@@ -1,7 +1,10 @@
 import { DateTime } from "luxon";
+
 import Attendance from "../models/attendance.model.js";
 import Leave from "../models/leave.model.js";
+
 import { sendResponse } from "../utils/response.js";
+
 import {
   getTodayDate,
   calculateLateMinutes,
@@ -13,57 +16,45 @@ import {
 
 const TIME_ZONE = "Asia/Kolkata";
 
-const normalizeStatus = (status) => {
-  const allowedStatuses = new Set([
-    "Present",
-    "Late",
-    "Half Day",
-    "Absent",
-    "On Leave",
-  ]);
-
-  if (allowedStatuses.has(status)) {
-    return status;
-  }
-
-  return "Absent";
-};
-
-const toDayKey = (dateTime) => dateTime.toFormat("yyyy-MM-dd");
+// --------------------------------------------------
+// Build approved leave dates
+// --------------------------------------------------
 
 const buildLeaveDateSet = (leaves, monthStart, monthEnd) => {
   const leaveDates = new Set();
-  const lastDayInMonth = monthEnd.minus({ days: 1 });
 
   leaves.forEach((leave) => {
-    const leaveStart = DateTime.fromJSDate(leave.startDate)
-      .setZone(TIME_ZONE)
-      .startOf("day");
-    const leaveFinish = DateTime.fromJSDate(leave.endDate)
+    const startDate = DateTime.fromJSDate(leave.startDate)
       .setZone(TIME_ZONE)
       .startOf("day");
 
-    const rangeStart =
-      leaveStart.toMillis() > monthStart.toMillis() ? leaveStart : monthStart;
+    const endDate = DateTime.fromJSDate(leave.endDate)
+      .setZone(TIME_ZONE)
+      .startOf("day");
+
+    const rangeStart = startDate > monthStart ? startDate : monthStart;
 
     const rangeEnd =
-      leaveFinish.toMillis() < lastDayInMonth.toMillis()
-        ? leaveFinish
-        : lastDayInMonth;
+      endDate < monthEnd.minus({ days: 1 })
+        ? endDate
+        : monthEnd.minus({ days: 1 });
 
     for (
-      let cursor = rangeStart;
-      cursor.toMillis() <= rangeEnd.toMillis();
-      cursor = cursor.plus({ days: 1 })
+      let date = rangeStart;
+      date <= rangeEnd;
+      date = date.plus({ days: 1 })
     ) {
-      leaveDates.add(toDayKey(cursor));
+      leaveDates.add(date.toFormat("yyyy-MM-dd"));
     }
   });
 
   return leaveDates;
 };
 
-// Check in
+// --------------------------------------------------
+// Check In
+// --------------------------------------------------
+
 export const checkIn = async (req, res) => {
   if (!isCheckInAllowed()) {
     return sendResponse(
@@ -76,33 +67,36 @@ export const checkIn = async (req, res) => {
 
   const today = getTodayDate();
 
-  const attendance = await Attendance.findOne({
+  const existingAttendance = await Attendance.findOne({
     employee: req.user._id,
     date: today,
   });
 
-  if (attendance) {
+  if (existingAttendance) {
     return sendResponse(res, 400, false, "Already checked in today.");
   }
 
-  const currentTime = getIndiaTime().toJSDate();
+  const checkInTime = getIndiaTime().toJSDate();
 
-  const lateMinutes = calculateLateMinutes(currentTime);
+  const lateMinutes = calculateLateMinutes(checkInTime);
 
   const status = lateMinutes > 0 ? "Late" : "Present";
 
-  const newAttendance = await Attendance.create({
+  const attendance = await Attendance.create({
     employee: req.user._id,
     date: today,
-    checkIn: currentTime,
+    checkIn: checkInTime,
     lateMinutes,
     status,
   });
 
-  sendResponse(res, 201, true, "Check In Successful", newAttendance);
+  sendResponse(res, 201, true, "Check In Successful", attendance);
 };
 
-// Check out
+// --------------------------------------------------
+// Check Out
+// --------------------------------------------------
+
 export const checkOut = async (req, res) => {
   const today = getTodayDate();
 
@@ -121,15 +115,14 @@ export const checkOut = async (req, res) => {
 
   const currentTime = getIndiaTime();
 
-  // Manual checkout is allowed only until 7:00 PM
-  const manualCheckoutEndTime = currentTime.set({
+  const checkoutDeadline = currentTime.set({
     hour: 19,
     minute: 0,
     second: 0,
     millisecond: 0,
   });
 
-  if (currentTime >= manualCheckoutEndTime) {
+  if (currentTime >= checkoutDeadline) {
     return sendResponse(
       res,
       400,
@@ -155,28 +148,33 @@ export const checkOut = async (req, res) => {
   sendResponse(res, 200, true, "Check Out Successful", attendance);
 };
 
-// Get today attendance
-export const getTodayAttendance = async (req, res) => {
-  const today = getTodayDate();
+// --------------------------------------------------
+// Get Today's Attendance
+// --------------------------------------------------
 
+export const getTodayAttendance = async (req, res) => {
   const attendance = await Attendance.findOne({
     employee: req.user._id,
-    date: today,
+    date: getTodayDate(),
   });
 
   sendResponse(res, 200, true, "Today's Attendance", attendance);
 };
 
-// Get attendance history
+// --------------------------------------------------
+// Get Attendance History
+// --------------------------------------------------
+
 export const getAttendanceHistory = async (req, res) => {
-  const currentMonth = getIndiaTime();
-  const monthValue = Number(req.query.month) || currentMonth.month;
-  const yearValue = Number(req.query.year) || currentMonth.year;
+  const currentDate = getIndiaTime();
+
+  const month = Number(req.query.month) || currentDate.month;
+  const year = Number(req.query.year) || currentDate.year;
 
   const monthStart = DateTime.fromObject(
     {
-      year: yearValue,
-      month: monthValue,
+      year,
+      month,
       day: 1,
     },
     {
@@ -184,9 +182,11 @@ export const getAttendanceHistory = async (req, res) => {
     },
   ).startOf("day");
 
-  const monthEnd = monthStart.plus({ months: 1 });
+  const monthEnd = monthStart.plus({
+    months: 1,
+  });
 
-  const query = {
+  const attendanceQuery = {
     employee: req.user._id,
     date: {
       $gte: monthStart.toFormat("yyyy-MM-dd"),
@@ -195,9 +195,10 @@ export const getAttendanceHistory = async (req, res) => {
   };
 
   const [attendanceRecords, approvedLeaves] = await Promise.all([
-    Attendance.find(query).sort({
+    Attendance.find(attendanceQuery).sort({
       date: 1,
     }),
+
     Leave.find({
       employee: req.user._id,
       status: "Approved",
@@ -211,75 +212,88 @@ export const getAttendanceHistory = async (req, res) => {
   ]);
 
   const attendanceMap = new Map(
-    attendanceRecords.map((record) => [record.date, record]),
+    attendanceRecords.map((attendance) => [attendance.date, attendance]),
   );
 
   const leaveDates = buildLeaveDateSet(approvedLeaves, monthStart, monthEnd);
 
-  const calendarDays = Array.from(
+  const today = getIndiaTime().toFormat("yyyy-MM-dd");
+
+  const days = Array.from(
     {
       length: monthStart.daysInMonth,
     },
     (_, index) => {
-      const dayDate = monthStart.plus({ days: index });
-      const dayKey = toDayKey(dayDate);
-      const attendance = attendanceMap.get(dayKey);
+      const date = monthStart.plus({
+        days: index,
+      });
 
-      const status = normalizeStatus(
-        attendance?.status || (leaveDates.has(dayKey) ? "On Leave" : "Absent"),
-      );
+      const dateKey = date.toFormat("yyyy-MM-dd");
+
+      const attendance = attendanceMap.get(dateKey);
+
+      const status =
+        attendance?.status || (leaveDates.has(dateKey) ? "On Leave" : "Absent");
 
       return {
-        date: dayKey,
-        day: dayDate.day,
-        weekday: dayDate.toFormat("ccc"),
+        date: dateKey,
+        day: date.day,
+        weekday: date.toFormat("ccc"),
         status,
         checkIn: attendance?.checkIn || null,
         checkOut: attendance?.checkOut || null,
         workingHours: attendance?.workingHours || 0,
         lateMinutes: attendance?.lateMinutes || 0,
-        isToday: dayKey === getIndiaTime().toFormat("yyyy-MM-dd"),
+        isToday: dateKey === today,
       };
     },
   );
 
-  const summary = calendarDays.reduce(
-    (accumulator, day) => {
-      const statusKey =
-        day.status === "Half Day"
-          ? "halfDay"
-          : day.status === "On Leave"
-            ? "onLeave"
-            : day.status.toLowerCase();
+  const summary = {
+    present: 0,
+    late: 0,
+    halfDay: 0,
+    absent: 0,
+    onLeave: 0,
+  };
 
-      if (accumulator[statusKey] !== undefined) {
-        accumulator[statusKey] += 1;
-      }
+  days.forEach((day) => {
+    if (day.status === "Present") {
+      summary.present++;
+    }
 
-      return accumulator;
-    },
-    {
-      present: 0,
-      late: 0,
-      halfDay: 0,
-      absent: 0,
-      onLeave: 0,
-    },
-  );
+    if (day.status === "Late") {
+      summary.late++;
+    }
+
+    if (day.status === "Half Day") {
+      summary.halfDay++;
+    }
+
+    if (day.status === "Absent") {
+      summary.absent++;
+    }
+
+    if (day.status === "On Leave") {
+      summary.onLeave++;
+    }
+  });
 
   sendResponse(res, 200, true, "Attendance history fetched successfully.", {
     pagination: {
-      currentMonth: monthValue,
-      currentYear: yearValue,
-      totalRecords: calendarDays.length,
+      currentMonth: month,
+      currentYear: year,
+      totalRecords: days.length,
     },
+
     attendance: attendanceRecords,
+
     calendar: {
-      month: monthValue,
-      year: yearValue,
+      month,
+      year,
       monthLabel: monthStart.toFormat("LLLL yyyy"),
       totalDays: monthStart.daysInMonth,
-      days: calendarDays,
+      days,
       summary,
     },
   });

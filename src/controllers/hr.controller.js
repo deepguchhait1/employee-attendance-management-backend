@@ -238,6 +238,7 @@ export const getAttendanceChart = async (req, res) => {
   ]);
 
   const totalDays = new Date(year, month, 0).getDate();
+
   const chartData = [];
 
   for (let day = 1; day <= totalDays; day++) {
@@ -270,12 +271,15 @@ export const getAttendanceChart = async (req, res) => {
     }
 
     if (status === "Half Day") {
+      chartData[dayIndex].present += count;
       chartData[dayIndex].halfDay += count;
     }
   });
 
   chartData.forEach((day) => {
-    day.absent = totalEmployees - day.present - day.halfDay;
+    day.absent =
+      totalEmployees -
+      day.present;
 
     if (day.absent < 0) {
       day.absent = 0;
@@ -286,12 +290,18 @@ export const getAttendanceChart = async (req, res) => {
     month: "long",
   });
 
-  sendResponse(res, 200, true, "Attendance chart fetched successfully.", {
-    month: monthName,
-    year,
-    totalEmployees,
-    chart: chartData,
-  });
+  sendResponse(
+    res,
+    200,
+    true,
+    "Attendance chart fetched successfully.",
+    {
+      month: monthName,
+      year,
+      totalEmployees,
+      chart: chartData,
+    },
+  );
 };
 
 // Get all employees

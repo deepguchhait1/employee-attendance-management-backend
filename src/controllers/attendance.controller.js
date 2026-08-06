@@ -115,14 +115,17 @@ export const checkOut = async (req, res) => {
 
   const currentTime = getIndiaTime();
 
+  // Manual checkout is allowed until 9:00 PM
   const checkoutDeadline = currentTime.set({
-    hour: 19,
+    hour: 21,
     minute: 0,
     second: 0,
     millisecond: 0,
   });
 
-  if (currentTime >= checkoutDeadline) {
+  // After 9:00 PM, manual checkout is disabled.
+  // The auto-checkout job should handle the attendance.
+  if (currentTime > checkoutDeadline) {
     return sendResponse(
       res,
       400,
